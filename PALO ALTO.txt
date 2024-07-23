@@ -1,0 +1,638 @@
+in this scenario will allowed client to connect from inside to outside.include the following 
+firewall will configure Routing( static and dynamic routing OSPf) , NAT, group policies, security policies to allow go out side ,DHCP Server on Ethernet0/1 to connect with client, where will connect via cisco router R1( configure IP address, OSPF,NAT, access list)
+########################################
+6:configuration and Adding LAB NAT/PAT 
+########################################
+conf t 
+ni ip domain-lookup
+! spann mode rapid
+no service time debug
+no service time log
+banner exec X
+Exec banner
+X
+banner incoming X
+Incoming banner 
+X
+banner login 
+login banner
+X
+! cdp timer 10
+!cdp holdtime 20
+line con 0
+exec-time 60
+logging sync
+exec-time 60
+privi level 15
+line vty 0 15
+no login
+exec-time 60
+logging sync
+exec-time 60
+privi level 15
+logging sync
+trans input all
+exit
+no service time debug
+no service time log
+end
+conf terminal 
+no router eigrp 1
+end
+wr
+
+int gig 0/0 
+no shutdown
+ip address dhcp
+exit
+int gig 0/1 
+no shutdown
+ip address 23.1.2.1 255.255.255.0 
+exit
+access-list 1 permit 23.0.0.0 0.255.255.255 
+ip nat inside source list 1 interface gig 0/0 overload
+int gig 0/0 
+ip nat outside
+int gig 0/1
+ip nat inside
+exit
+sh ip route
+sh ip int bri
+ping 8.8.8.8
+ping 8.8.8.8 source 23.1.2.1
+sh ip nat translations
+wr 
+
+########################################
+initial bootsrtap config for Palo Alto firewall
+########################################
+login admin pw=admin
+show config running 
+show interface management 
+configure 
+set deviceconfig system ip-address 192.168.1.11 netmask 255.255.255.0
+set deviceconfig system default-gateway 192.168.1.1( sometime 192.168.1.254)
+set deviceconfig system dns-setting servers primary 8.8.8.8
+set deviceconfig system type static
+commit  
+exit 
+show interface management 
+ping host 8.8.8.8
+ping host www.paloaltonetworks.com
+ open the browser https://192.168.1.11---->admin,admin
+to configure the interfaces ----> Device ----> interfaces ---->
+
+########################################
+L3 security Zones
+########################################
+create zones (inside zone=(eth1/1) & outside zone=(eth1/3))
+ network ----> zones ----> ADD ----> 
+name = inside_zone , type = Layer3 ---->OK
+ADD ---->name = outside_zone , type = Layer3 ---->OK
+----> Commit ---->commit ---->close
+########################################
+L3 Interfaces
+########################################
+(inside zone connect with interface(eth1/1) & outside zone connect with interface (eth1/3))
+network ----> interfaces ----> click on ethernet1/1 ----> interface type= Layer3, under tab config ( security zone=inside_zone), under tab IPV4 (type =static ----> add ----> 10.1.0.11/24 ----> OK))----> commit----> commit----> close----> refresh
+
+network ----> interfaces ----> click on ethernet1/3 ----> interface type= Layer3, under tab config ( security zone=outside_zone), under tab IPV4 (type =static ----> add ----> 23.1.2.11/24 ----> OK))----> commit----> close----> refresh
+################
+Virtual router
+################
+create new virtual router and assign interfaces to this virtual router
+network ----> Virtual routers ---->select default ----> delete----> yes
+click Add ---->(( name= Our Virtual router ----> ok))
+****assoicate Interface with virtual router****
+click on Our Virtual router ---->((gerneral ----> add ----> ethernet1/1 ---->add ----> ethernet1/3add ----> ethernet1---->OK---->commit---->commit---->close----> refersh
+ **** confirmation creating virtual router***
+network ----> Virtual routers ---->more runtime stats ---->Router table , forwarding table 
+########################################
+Adding static routes
+########################################
+network ----> Virtual routers ---->click on Our Virtual router ---->static routers ---->IPV4 ----> Add---->
+(( Name=Our_default_Router, Destination=0.0.0.0/0, next hop=IP Address, 23.1.2.1 ---->ok ---->ok---->commit---->commit---->close---->refresh))
+**** confirmation creating virtual router***
+network ----> Virtual routers ---->more runtime stats ---->Router table , forwarding table 
+############################
+Using Dynamic Routing (OSPF)
+############################
+***enable OSPF on Router R1***
+conf t
+router ospf 1
+network 23.0.0.0 0.255.255.255 area 0
+router-id 1.1.1.1
+network 1.1.1.1 0.0.0.0 area 0
+int lo 0
+ip add 1.1.1.1 255.255.255.255
+no shutdown 
+end 
+wr
+show run | section router
+sh ip ospf int brief
+conf t 
+router ospf 1
+default-information originate
+end
+wr
+***enable OSPF on Firewall***
+network ----> Virtual routers ---->click on Our Virtual router ---->OSPF---->((click on Enable , uncheck reject efault router, Router ID=11.11.11.11, (Area---->Add---->((Area ID=0.0.0.0, Interfaces=(ADD---->interfaces=ethernet1/3---->OK))---->OK)---->OK---->commit---->commit---->close
+
+**** on R1***
+sh ip ospf ne
+**** confirmation creating virtual router***
+network ----> Virtual routers ---->more runtime stats ---->Router table , forwarding table
+
+############################
+configure DHCP server
+############################
+***implementation DHCP server on firewall***
+network ---->DHCP---->DHCP Server---->Add---->((interface=ethernet1/1,mode=auto, under lease ((check Ping IP when allocating new IP, lease chech timeout= 1 Days ---->under IP POOLS---->click Add ---->((10.1.0.51-10.1.0.99))
+under Options (( Gateway=10.1.0.11,Subnet Mask=255.255.255.0, Primary DNS=8.8.8.8))---->OK---->commit---->commit---->close
+##################################
+Verifying and Testing DHCP server
+###################################
+right click on Client-1 ----> Edit----> (Enable DHCP on Eth0 =Check it))---->save
+right click on ((client-1&VPC )---->start
+***VPC***
+ip dhcp
+show ip
+***Client-1***
+double click on it ---->click on RDP session---->OK ---->applications----> system tools---->Mate terminal---->ifconfig
+route -n
+ping 10.1.0.11 ### doesnot work###
+##################################
+Troubleshooting a failed Ping 
+###################################
+network ----> interfaces ----> click on ethernet1/1 ---->advanced ---->under other info ----> management profile----> new management profile ----> (name= our-management-profile, under administrative management service=select HTTPS,SSH, under network services select Ping)---->ok---->ok---->yes---->commit---->commit---->close
+***open the client-1***
+ifconfig
+route -n
+ping 10.1.0.11
+##################
+configure NAT/PAT 
+##################
+in our scenario will be as following 
+any client from inside network will go out side network , where source=lan(10.1.0.0à, destination=WAN(internet)=(23.1.2.11)
+configure NAT translation
+Policies----> NAT----> Add----> (Name=Our-Source-NAT/PAT)----> click on Oiginal Packet Tab----> (source zone ----> click Add ----> select=inside-zone), (destination zone=Outside-zone, destination interface=any(or ethernet1/3), servcie=any),source address----> click Add (click on new address=(name=HQ_Net10.1.0.0,type=IP Network=10.1.0.0/24)----> ok), Destination ADDRESS=Any))----> click on Tanslat Packet tab----> (source address translation Tab (Translation Type=Dyanmic IP and Port, Address Type=Interface Address,interface=ethernet1/3, IP address=23.1.2.11/24)----> ok----> commit----> commit----> close
+***veryfing and testing the client go outside to internet***
+ifconfig eth0
+route -n
+ping 8.8.8.8 **not working because of policies security , where by the default policy is deny action*** 
+#################################
+configure basic security policies
+#################################
+how to allow the traffic from inside network to outside , and trafice from ouside (internet) to access to inside our network(lan).
+1: from inside zone(any trafice from 10.1.0.0/24) to outside-zone(any destination) allow to go out side (internet).
+ Policies---->security---->add ((Name=Simple-security-role,description=basic role to test the connectivaity to public internet,select Source tab ---->click add ---->select inside-zone,source address---->add---->HQ-NET10.1.0.0)
+select Destination Tab(Destination Zone---->add(select Outside-Zone), Destination Address=any,any)
+select Appliction Tab(any)
+select Actions TAB=(Action Setting(Action=allow)---->ok---->commit---->commit---->close
+***veryfing and testing the client go outside to internet***
+ifconfig eth0
+route -n
+ping 8.8.8.8 
+#######################################################################
+in this scenario will configure DMZ Zone , where try the client from inside the network to connect with web server on DMZ zone, will configure security policy only , because routing aleady configured , and no need NAT , because NAT need only if you wan to connect to internet via WAN interface.
+
+Adding a DMZ
+################
+click on startup-config ----> click on DMZ server and past the following 
+ip addr add 172.16.1.100/24 dev eth0 || true
+ip route add default via 172.16.1.11 || true
+
+cat > /etc/resolve.conf << EOF
+nameserver 8.8.8.8
+EOF
+click save ----> click on DMZ-Server and enable it ----> save ----> start DMZ-Server----> connect with VNC ----> ifconfig eth0 ----> route -n
+
+*** try to connect to internet by using DMZ-Server***
+we need configure RNR(Routing,NAT,Rule) 
+1:create new zone called DMZ and add new interface to this zone. ip address is 172.16.1.0/24
+network ----> zones ----> ADD ----> 
+name = DMZ_zone , type = Layer3 ---->OK
+ADD ---->name = DMZ_zone , type = Layer3 ---->OK
+----> Commit ---->commit ---->close
+network ----> interfaces ----> click on ethernet1/2 ----> interface type= Layer3, under tab config ( security zone=DMZ_zone,Virtual Router=Our_Virtual_Router), under tab IPV4 (type =static ----> add ----> 172.16.1.11/24) under advanced management profile=Our_Mangement_profile) ----> OK))----> commit----> commit----> close----> refresh
+
+***verifying***
+open DMZ-Server terminal and (ping 172.16.1.11) 
+
+##############################
+inside to DMZ security rules
+##############################
+where will allow the client from other LAN to connect to DMZ-Server( source=inside-zone, destination=DMZ-Zone , action=allow) 
+Policies---->security---->add ((Name=In-To-DMZ,description=basic role to test the connectivaity to DMZ,select Source tab ---->click add ---->select inside-zone,source address---->add---->HQ-NET10.1.0.0)
+select Destination Tab(Destination Zone---->add(select DMZ-Zone), Destination Address=click ADD ----> new address (Name=DMZ-Server-Private-Adsress,Type = IP Netmask ,172.16.1.100/32)
+select Appliction Tab(any)
+select Actions TAB=(Action Setting(Action=allow)---->ok---->commit---->commit---->close
+***veryfing and testing the client connect to DMZ-Server***
+##########################################################################################
+the second point allow client from out side to connect to webserver on DMZ Zone, we need configure NAT, security policies only . after that do the testing. 
+destination NAT= allow client connect from outside(internet to DMZ server)
+##########################################################################################
+in this scenario will map the IP address is 23.1.2.100 to 172.16.1.100 , it called preNAT or destination NAT(DNAT).
+will concentrate on Zone and IP address and Policies.
+1:configure the policy for Destination NAT(DNAT).
+policies -----> NAT  -----> Add----> (Name=OUT-TO-DMZ-server)----> click on Oiginal Packet Tab----> (source zone ----> click Add ----> select=Outside-zone), (destination zone=Outside-zone(because will use 23.1.2.100), destination interface=any(or ethernet1/3), servcie=any),source address=any, Destination ADDRESS=click ADD ----->click New address  -----> name=DMZ-Public-IP, Type=IP netmask = 23.1.2.100/32 ----->OK ))----> click on Tanslated Packet tab----> (Destination address translation Tab (Translation Type=Static IP, Translate Address=DMZ-Server-Private-Address)----> ok----> commit----> commit----> close
+
+2:***configure security Policies to allow client from outside to connect to DMZ server****
+Policies---->security---->add ((Name=Out-DMZ-Zone,description=basic role to allow the connectivaity to DMZ Zone from internet(outside),select Source tab ---->click add ---->select Outside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select DMZ-Zone), Destination Address=click Add ---->DMZ-Public-IP,any)
+select Appliction Tab(any)
+select Actions TAB=(Action Setting(Action=allow)---->ok---->commit---->commit---->close
+
+3:**testing the connectivity from outside to DMZ server***
+add new client(docker.io, type eve-kali-large:latest,name=internet-user,icon=Desktop4.png) and connect with network (23.1.2.0) ----->select from menu startup-configure  -----> double click on internet-user and past
+ip addr add 23.1.2.50/24 dev eth0 || true
+ip route add default via 23.1.2.1 || true
+cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+EOF
+-----> save ----->  power on -----> save-----> close-----> start the internet_user-----> connect via rdp -----> ok----->open terminal ----->
+ ifconfig eth0 
+route -n 
+ping paloaltonetwork.com
+ping 23.1.2.100
+open the brower and type (23.1.2.100)
+############################################################
+Tap Interface configuration
+############################################################
+add new switch L2(cisco vios switch)
+connect Switch with firewall via interface Eth1/4, and connect client(internet_user) to switch, and connect the switch to 23.1.2.0 via interface G0/2.
+confirm the internet user still connect to internet.
+after that will create new zone call Tap zone and interface ethernet 1/4 located with Tap zone.
+***will configure the switch to mirror the traffic on it to pass to firewall***.
+switch=en
+sh int status
+show monitor session all
+conf t
+monitor session 1 Source vlan 1
+monitor session 1 destination interface Gig 0/0
+show monitor session all
+sh interface gig 0/0
+***configure firewall to recieve the information from switch on interface Eth1/4 to act as Tap interface***
+network ----> interfaces ----> click on ethernet1/4 ----> ,comment= connect to switch port 0/0 ,interface type= Tap, under tab config ( security zone=click on New Zone ----> name= TAP Zone----> OK), ----> commit----> commit----> close----> refresh 
+########################
+virtual Wire Overview
+########################
+configure firewall between 2 switches or users and G/W, where the users will go to out side via firewall after that go to G/W.
+***will delete the switch , after that will configure two interfaces on firewall as Virtual wire interface(Eth1/5 will connect to client via VW-Zone-A,Eth1/6 will connect to internet=23.1.2.0 will connect VW-Zone-A),where the internet_user device will connect to internet via virtual wire via firewall.
+*create interfaces*create virtual ware*create zones*create security policies to allow go out side.
+1:create Virtual Wire
+network  -----> virtual wires  -----> ADD  -----> (Name=Our-Virtual-Wire,click on link state pass through  ----->ok).
+2:create interfaces
+**interface ethernet1/5**
+network ----> interfaces ----> click on ethernet1/5 ----> interface type= Virtual Wire, under tab config ( Virtual Wire=Our-Virtual-Wire ,security Zone=click New Zone----->(name=VWire_Zone_A)-----> ok), 
+**interface ethernet1/6***
+network ----> interfaces ----> click on ethernet1/6 ----> interface type= Virtual Wire, under tab config ( Virtual Wire=Our-Virtual-Wire ,security Zone=click New Zone----->(name=VWire_Zone_B)-----> ok),  ----> OK))----> commit----> commit----> close----> refresh
+3.create security policy to allow user to connect to internet.
+Policies---->security---->add ((Name=VWire-Rule,description=basic role to allow the connectivaity to client with virtual wire to connect internet(outside),select Source tab ---->click add ---->select VWire-zone-A,source address=any
+select Destination Tab(Destination Zone---->add(select VWire-zone-B), Destination Address=any)
+select Appliction Tab(any)
+select Actions TAB=(Action Setting(Action=allow)---->ok---->commit---->commit---->close
+***verifyoing the configuration****
+on client (internet_user) 
+ping 8.8.8.8 ###must working if the configuraion is corrected###
+
+####################
+Layer 2 interfaces
+####################
+1:Delete Virtual Wire
+network  -----> virtual wires  -----> select  -----> (Name=Our-Virtual-Wire  ----->Delete ----> yes).
+2:create VLAN to add the specific interface to VLAN.
+network ----> VLAN ----> Add ---->(Name=Our-Vlan ----> OK)
+**interface ethernet1/5**
+network ----> interfaces ----> click on ethernet1/5 ----> interface type= Layer 2, under tab config ( VLAN=Our-VLAN ,security Zone=click New Zone----->(name=L2_Zone_A)-----> ok),----> OK
+**interface ethernet1/6***
+network ----> interfaces ----> click on ethernet1/6 ----> interface type= Layer 2, under tab config ( VLAN=Our-VLAN ,security Zone=click New Zone----->(name=L2_Zone_B)-----> ok),----> OK))----> commit----> commit----> close----> refresh
+3.create security policy to allow user to connect to internet.
+Policies---->security---->add ((Name=L2-Rule,description=basic role to allow the connectivaity to client with virtual wire to connect internet(outside),select Source tab ---->click add ---->select L2-zone-A,source address=any
+select Destination Tab(Destination Zone---->add(select L2-zone-B), Destination Address=any)
+select Appliction Tab(any)
+select Actions TAB=(Action Setting(Action=allow)---->ok---->commit---->commit---->close
+***verifyoing the configuration****
+on client (internet_user)
+ifconfig eth0
+route -n 
+ping 23.1.2.1
+ping 8.8.8.8 ###must working if the configuraion is corrected###
+open the browser www.google.com
+
+#######################################################"
+in this scenario will allow client to connect SSH with our router based on two secanrio
+1.connect based on (Port based rules --permit SSH TCP:22°)
+2.connect based on (APPLICATION BASED --permist SSH application).
+*** create security policy depend on first secanrio***
+Policies---->security---->add ((Name=SSH-Port-Based-Rule,description=basic role to allow the connectivaity to client by SSH based on Port,select Source tab ---->click add ---->select inside-zone,source address=HQ-10.1.0.0
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select Appliction Tab=any)
+select service/URL Category -----> add(Name=looking_for_TCP_22, protcols=TCP, source Port=22 ---> ok)
+select Actions TAB=(Action Setting(Action=allow)---->ok
+drag the secuity policies to first one.
+**create security policies beas on type of application=ssh)
+2.connect based on (APPLICATION BASED --permist SSH application).
+Policies---->security---->add ((Name=SSH-Application-Based-Rule,description=basic role to allow the connectivaity to client by SSH based on application,select Source tab ---->click add ---->select inside-zone,source address=HQ-10.1.0.0
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select Appliction Tab=add ----> select SSH)
+select service/URL Category -----> any(application default)
+select Actions TAB=(Action Setting(Action=allow)---->ok---->commit---->commit---->close
+***verifyoing the configuration****
+open the client and send ssh traffic to router
+ssh 23.1.2.11
+**disable the security policy based on Port**
+***verifyoing the configuration****
+open the client and send ssh traffic to router
+ssh 23.1.2.11
+###############################################
+in this scenario will configure security policy based on Facebook-app
+Policies---->security---->add ((Name=FaceBook-Access,description=basic role to allow  client to FB,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select Appliction Tab=add ----> select FaceBook-app, Depands on=Facebook-code ----> Add to current rule,
+Appliction Tab=add ----> select FaceBook-chat, Depands on=mqtt-base ----> Add to current rule
+Appliction Tab=add ----> select ssl
+)
+select service/URL Category -----> any)
+select Actions TAB=(Action Setting(Action=allow),select log at seesion start, uncheck log at session end
+---->ok
+** move the rule to top of security rules***
+---->commit---->commit---->close
+***verifyoing the configuration****
+on client, open facebook on the browser
+3.to check the monitor on firewall**
+monitor ---> traffic ---> search for facebook, ssl
+##############################
+APPLICATION GROUPS
+###############################
+in this scenario will create group of application in side our secuirty  policies.
+objects ----> application Groups ---->Add ---->(Name=Our_FB_App_Group_and_DNS----> add---->search "facebook ---->select facebook apps,---->add ---->search "FaceBook" ---->select" facebook-base"---->add---->search "FaceBook"---->select "FaceBook-chat"---->add ---->search "FaceBook"---->select "mqtt-base"---->add---->search "ssl" ---->select "ssl"---->add---->search "DNS" ---->select "DNS" -----> ok)
+***apply the application group with secuirty policy***
+Policies---->security---->add ((Name=FB_Rule_With_APP_Group,description=basic role to allow  client to FB,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select Appliction Tab=add ----> select Our_FB_App_Group_and_DNS, 
+)
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),select log at seesion start, uncheck log at session end
+---->ok
+***move the security poilicy up***
+ ---->commit---->commit---->close
+***verifyoing the configuration****
+rest the HIT COUNT
+on client, open facebook on the browser
+3.to check the monitor on firewall**
+refresh ---> chech the HIT COUNT (the number will include DNS,SSL,FB Options)
+monitor ---> traffic ---> search for facebook, ssl
+
+##############################
+APPLICATION Filters
+##############################
+objects ----> applications filters ---->add ( Name=Our_App_Filter ----> under CATEGORY=select "business systems"and ""general internet", under SUBCATEGORY= select "OFFICE-PROGRAMS", under RISK= select "1,2",  under CHARACTERISTIC=Widaly Used---->OK
+***apply the application filter with secuirty policy***
+Policies---->security---->add ((Name=Using_App_Filter,description=basic role to allow  client to using application filter,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select Appliction Tab=add ----> select =Our_App_Filter, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),select log at seesion start, uncheck log at session end
+---->ok
+***move the security poilicy up***
+ ---->commit---->commit---->close
+***verifyoing the configuration****
+rest the HIT COUNT
+on client, open facebook on the browser
+3.to check the monitor on firewall**
+refresh ---> chech the HIT COUNT (the number will include DNS,SSL,FB Options)
+monitor ---> traffic ---> search for facebook, ssl
+
+########################################
+Convert to APPLICATION-ID Secuirty rules
+########################################
+Policies---->security---->Policy Optimizer---->Ruls Without App Controls---->select---->wide_open----> select all applications ---->create cloned rules---->Applications---->Name=Clone_rule_from_optimizer---->ok
+**confirmation**
+Policies---->security--->search on "Clone_rule_from_optimizer"
+reset rules HIT COUNT ---> all
+---->commit---->commit---->close
+click on rules "Using_app_filter,FB_Rules_with,Face-book-access"----> disable
+---->commit---->commit---->close
+**if would like to know if the traffic donot match rule*
+will modify the rule called interzone-default , click on it ---->override ---->actions---->select log at session star, log at session End---->OK
+---->commit---->commit---->close
+2:
+Policies---->security---->Policy Optimizer---->Ruls Without App Controls---->select---->inside-to-DMZ----> select all applications ---->Add This rule---->OK---->ok
+**confirmation**
+Policies---->security--->search on "inside-to-DMZ"
+reset rules HIT COUNT ---> all
+---->commit---->commit---->close
+on client from inside, open the browser 172.16.1.100,and ping 172.16.1.100, ftp://172.16.1.100 DMZ server
+
+
+########################################
+Generate a Self-Signed Certificate
+########################################
+in this scenario will Generate certificate on firewall and share with client to make trust between of them to dencrypt the information before send to client after that encrypted and send it.
+****create certificate on Firewall***
+Device ----> Certificate Management ----> Certificates ----> Generate ----> ( certificate type =local , Name=PA-FW1-Self-Signed, Commen Name= PA-FW1, check certificate Authority, under certificate attribute ---->Add 
+----> select TYPE= Country= "C" from "Subject" field , VALUE=FR(FRANCE)
+---->Add ----> select TYPE= state= "ST" from "Subject" field , VALUE=Loire
+---->Add ----> select TYPE= Locality= "L" from "Subject" field , VALUE=Saint-etienne
+----> Generate ----> OK
+click on PA-FW1-Self-Signed ----> check forward Trust Certificate , Forward untrust certificate ,Trusted Root CA ---->OK ---->commit---->commit---->close
+**Adding a Trusted CA to Clients**
+1:allow Https on the management interface 
+Network ----> interface management ---->add ---->(name=allow-mgmt-and-ping, under administrative management services check (Https,SSH) under network services check(ping))---->ok
+2:associate management profile with interface Ethernet0/1
+network ----> interfaces----> ethernet0/1 ---->advanced ---->management profile=allow-mgmt-and-ping)---->ok---->ok
+---->commit---->commit---->close
+3:**confirmation**
+open the web browser with https on client1 on network 10.1.0.0
+https://10.1.0.11
+on firewall devices ---->certificates ----> select PA-FW1- ----> export certificate ---->ok ---->keep 
+open download ----> double click on certificate ----> under general tab click on install certificate----> select local machine---->next---->yes---->select Place all certificate in the following store---->browser---->Trusted root certifcation authorities---->ok----> next----> finish ---->ok---->ok
+logout firewall
+**verifying the certificate is avaiable on browser**
+on chrome ----> setting :----> settings ----> search"certificate" security ----> manage certificate ----> trusted root certification authorities ---->select PA_FW1---->close
+open the web browser with https on client1 
+https://10.1.0.11
+****Implement Decryption Policy Rules****
+Policies---->Decryption---->add ((Name=Our_Decryption_Rule,description=basic role to DEcryption the connection ,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select service/URL Category -----> application default, URL CATEGORY =any 
+select Options TAB=(Action= Decrypt,Type= SSL Forword Proxy, Decryption Profile ---->New Decryption Profile---->(name=Our_Decryptio_Profile, check the first fourth box and unssported check 1,3, under failure checks all---->OK)
+under Log Setting check log Succesful SSL Handshake,log UnSuccesful SSL Handshake ---->ok---->commit---->commit---->close
+****Veryfing the Encryption Policy***
+open the browser on your client check facebook certificate "must be issued by PA-FA"
+***Add a Decryption Policy to PA-FW2***
+1:Device ----> Certificate Management ----> Certificates ----> Generate ----> ( certificate type =local , Name=PA-FW2, Commen Name= PA-FW2, check certificate Authority, ----> Generate ----> OK
+2:click on PA-FW2 ----> check forward Trust Certificate , Forward untrust certificate ,Trusted Root CA ---->OK ---->commit---->commit---->close 
+
+3:Policies---->Decryption---->add ((Name=PA_FW2_Decryption_Rule,description=basic role to DEcryption the connection ,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=outside-zone ), Destination Address=any)
+select service/URL Category -----> application default, URL CATEGORY =any 
+select Options TAB=(Action= Decrypt,Type= SSL Forword Proxy, Decryption Profile ---->default)
+under Log Setting check log Succesful SSL Handshake,log UnSuccesful SSL Handshake ---->ok---->commit---->commit---->close
+4:allow Https on the management interface 
+Network ----> interface management ---->add ---->(name=allow-mgmt-and-ping, under administrative management services check (Https,SSH) under network services check(ping))---->ok
+5: associate management profile with interface Ethernet0/1 on PA_FW2
+network ----> interfaces----> ethernet0/1 ---->advanced ---->management profile=allow-mgmt-and-ping)---->ok---->ok
+---->commit---->commit---->close
+
+4:**connect the client to PA_FW2**
+configure dhcp on interface Ethernet0/1
+open the browser and search for  paypal.com , and client does not trust the certificate , to fix it log in to firewall and download the certifcate and add to trusted root certificate authorities.
+on firewall devices ---->certificates ----> select PA-FW2 ----> export certificate ---->ok ---->keep 
+open download ----> double click on certificate ----> under general tab click on install certificate----> select local machine---->next---->yes---->select Place all certificate in the following store---->browser---->Trusted root certifcation authorities---->ok----> next----> finish ---->ok---->ok ---->logout firewall
+**open the browser and search for  paypal.com** must be accepted the certificate and connect in secure (https)
+
+#########################################################
+configure site to site vpn
+#########################################################
+in this scenario will configure Site to Site VPN , where will contents the follwing points.
+1: implement site to site
+***configure PA-FW1***
+*change the name of  hostname ----> devices ---->Setup ---->management---->setting---->hostname=PA-FW1---->OK
+---->commit---->commit---->close
+**will create our Tunnel interface**
+on PA-FW1:
+network----> interfaces---->Tunnel---->Add(Interface name=tunnel,6783, comment =Tunnel to site2
+under config (Virtual Router=Our-Virtual-Router, security zone=click New Zone ---->name=S2S_VPN_Zone---->ok)
+under IPV4 (Add ---->10.7.7.11/24)---->ok---->ok
+on PA-FW2:
+network----> interfaces---->Tunnel---->Add(Interface name=tunnel,6783, comment =Tunnel to site1
+under config (Virtual Router=Our-Virtual-Router2, security zone=click New Zone ---->name=S2S_VPN_Zone---->ok)
+under IPV4 (Add ---->10.7.7.12/24)---->ok
+***create IKE Crypto and IPSec crypto and IKE GateWays***
+the IKE crypto and IPSec crypto will use the default on both side of site to site VPN,but we need to create IKE GateWays as following steps.
+on PA-FW1:
+network----> Network Profile---->IKE GateWays---->Add ( Name=Peering-Over-To-FW2, Address type=IPV4, Interface=Ethernet1/3,Local IP Address=23.1.2.11/24,Peer IP Address=IP, Peer Address=23.1.2.12
+Authentication=Pre-Shared Key, Pre-Shared Key=*Libya4ever*, Confirmation Pre-Shared Key=*Libya4ever*
+---->OK
+on PA-FW2:
+network----> Network Profile---->IKE GateWays---->Add ( Name=Peering-Over-To-FW1, Address type=IPV4, Interface=Ethernet1/3,Local IP Address=23.1.2.12/24,Peer IP Address=IP, Peer Address=23.1.2.11
+Authentication=Pre-Shared Key, Pre-Shared Key=*Libya4ever*, Confirmation Pre-Shared Key=*Libya4ever*
+---->OK
+
+***create IPSec Tunnel***
+on PA-FW1:
+network---->IPSec Tunnels---->Add---->(Name=Tunnel-To-FW2, Tunnel interface=Tunnel6783,Type=Auto key
+Address Type=IPV4
+IKE Gateway=Peering-Over-To-FW2
+IPSec Crypto Profile=default
+check show Advanced Options
+Check Tunnel monitoring ( Destination IP=10.7.7.12)
+under Proxy IDs tab ---->Add---->(Proxy ID= Interesting_traffic, Local=10.1.0.0/24,Remote=10.2.0.0/24)---->OK---->OK---->commit---->commit---->close
+
+on PA-FW2:
+network---->IPSec Tunnels---->Add---->(Name=Tunnel-To-FW1, Tunnel interface=Tunnel6783,Type=Auto key
+Address Type=IPV4
+IKE Gateway=Peering-Over-To-FW1
+IPSec Crypto Profile=default
+check show Advanced Options
+Check Tunnel monitoring ( Destination IP=10.7.7.11)
+under Proxy IDs tab ---->Add---->(Proxy ID= Interesting_traffic, Local=10.2.0.0/24,Remote=10.1.0.0/24)---->OK---->OK---->commit---->commit---->close
+****verfying the connection **
+must be the tunnel on both sides are green
+
+2:VPN and Routing
+create Virtual Routing to connect between two firewall and send the traffic over tunnel interfaces. by creating static routing on both side (FW1&FW2)
+on PA-FW1:
+Ntwork ----> Virtual Routers ----> default ---->Static Routes ---->ADD---->(Name=Site-to-Network,Destination=10.2.0.0/24, interface =Tunnel6783,Next Hop=IP Address=10.7.7.12---->OK)---->OK---->commit---->commit---->close
+on PA-FW2:
+Ntwork ----> Virtual Routers ----> Our Virtual Router2 ---->Static Routes ---->ADD---->(Name=HQ-Network,Destination=10.1.0.0/24, interface =Tunnel6783,Next Hop=IP Address=10.7.7.11---->OK)---->OK---->commit---->commit---->close
+***verification the connectivity between two sites**
+from site 1 ping the client on Sites
+ifconfig eth0 on both clients on site1 and Site2
+ping 10.2.0.5* ####not working because missing the secuirty policies configurations####
+
+3:Security rules and policies for VPN
+on PA-FW1:
+1.create rules allow the client(10.1.0.0/24) from inside to connect via S2S-VPN rules on other site (10.2.0.0/24).
+Policies---->security---->add ((Name=Out-To-VPN,description=basic role to allow  client on site1 to connect with client on Site2 using VPN ,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=S2S_VPN_Zone ), Destination Address=any)
+select Appliction Tab=any, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),
+---->ok---->move to the Top of Secuirty policies
+2.create rules allow the traffic from client (10.2.0.0/24) from Other site2 to connect via S2S-VPN with client (10.1.0.0/24) on Site1
+Policies---->security---->add ((Name=In-From-VPN,description=basic role to allow  client on site2 to connect with client on Site1 using VPN ,
+select Source tab ---->click add ---->select S2S_VPN_Zone ,source address=any
+select Destination Tab(Destination Zone---->add(select=Inside-Zone ), Destination Address=any)
+select Appliction Tab=any, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),
+---->ok---->commit---->commit---->close
+
+on PA-FW2:
+1.create rules allow the client (10.2.0.0/24) from inside to connect via S2S-VPN rules on other site (10.1.0.0/24)
+Policies---->security---->add ((Name=Out-To-VPN,description=basic role to allow  client on site1 to connect with client on Site2 using VPN ,select Source tab ---->click add ---->select inside-zone,source address=any
+select Destination Tab(Destination Zone---->add(select=S2S_VPN_Zone ), Destination Address=any)
+select Appliction Tab=any, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),
+---->ok---->move to the Top of Secuirty policies
+2.create rules allow the traffic from client (10.1.0.0/24) from Other site1 to connect via S2S-VPN with client (10.2.0.0/24) on Site2
+Policies---->security---->add ((Name=In-From-VPN,description=basic role to allow  client on site2 to connect with client on Site1 using VPN ,
+select Source tab ---->click add ---->select S2S_VPN_Zone ,source address=any
+select Destination Tab(Destination Zone---->add(select=Inside-Zone ), Destination Address=any)
+select Appliction Tab=any, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),
+---->ok---->commit---->commit---->close
+
+***verification the connectivity between two sites**
+from site 1 ping the client on Sites
+ifconfig eth0 on both clients on site1 and Site2
+*on both clients run the following commands*
+ping 8.8.8.8
+ping 10.2.0.5*  ping 10.1.0.5*
+
+#################################################
+in this scenario will allow the firewall to monitor (User-ID) AD server and verify the connectivity the user whose login by steuping the intgration with AD server and specifying the user will be actived on which Zone(Inside_Zone).and LDAP configuration for groups.and configure the security policies based on allowed or not this group.
+
+1:enable USER ID on Inside Zone
+network ---> click on inside-Zone --->under UserIdentification ACL check Enable User Identification--->Add--->HQ_10.1.0.0, EXCLUDE LIST--->Add=192.168.1.0/24--->OK
+2:
+Device--->User identification --->Palo Alto Network User-ID Agent Setup--->Setting--->under Server Monitor Account (Username=ogit\administrator,Domain's DNS name=ogit.local,password=******,confirm password=******,)
+--->OK
+under Server Monitoring --->Add (Name=Our_AD_Server,Type=Microsoft Active Directory, Transport Protocol=WMI,Network Address=192.168.1.100--->OK---->commit---->commit---->close
+3:Adding group Mapping and LDAP
+1:Configuring LDAP
+Device--->Server Profiles--->LDAP--->Add--->(Profile Name=Our_LDAP_Profile, Server List--->add(Name=Our_WinServer,LDAP Server=192.168.1.100,PORT=389°
+under Server Settings Tab=( TYPE=active-directory,Base DN=DC=ogit,DC=local,Bind DN=administrator@ogit.local,Password=******,confirm Password=*****
+uncheck Require SSL/TLS secured connection --->OK---->commit---->commit---->close
+2:Adding Group Mapping 
+Device---->User Identification ----> Group Mapping Settings ----> add ---->(Name=Our_Group_Mapping, 
+under Server Profile=Our_LDAP_Profile
+under Group Include List ---->click on DC=ogit,DC=local---->cn=users---->select group=domain admin,domain user ---->click + ---->OK---->commit---->commit---->close
+
+4:integrate User-id and group as part of secuirty policies
+add the following users(assulai,user1,tech)  to domain admin, and add the following users(assulai,testing,admin) to domain user, where will be on windows server ADDS.
+1:adding some security policies for domain admin
+Policies---->security---->add ((Name=For_Domain_Admins
+select Source tab ---->click add ---->select Inside_Zone ,source address=any,Source User---->Add---->ogit\domain admin
+select Destination Tab(Destination Zone---->add(select=Outside-Zone ), Destination Address=any)
+select Appliction Tab=any, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=allow),
+---->ok
+drag to the top ---->commit---->commit---->close
+2:adding some security policies for domain user
+Policies---->security---->add ((Name=Sorry_Domain_Users
+select Source tab ---->click add ---->select Inside_Zone ,source address=any,Source User---->Add---->ogit\domain users
+select Destination Tab(Destination Zone---->add(select=Outside-Zone ), Destination Address=any)
+select Appliction Tab=any, 
+select service/URL Category -----> application default)
+select Actions TAB=(Action Setting(Action=Drop,check Send ICMP Unreachable),check log at session start only
+---->ok
+drag to the second  ---->commit---->commit---->close
+***log in on Windows client 1 as user1***
+***confirm the ip-user is mapping 
+logging to CLI on FW
+show user ip-user-mapping all
+***another way to confirmation**
+monitor -----> user-id--->
+and also try to ping 8.8.8.8 on client 1 as login user=user1## will not be able to go out , becasue is drop by security policy
+** login as tech user **
+***another way to confirmation**
+monitor -----> user-id--->
+try to ping 8.8.8.8 =will go out 
+
